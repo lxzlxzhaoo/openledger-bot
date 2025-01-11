@@ -5,6 +5,31 @@ const readline = require('readline');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { v4: uuidv4 } = require('uuid');
 
+let dataStore = {};
+try {
+  dataStore = JSON.parse(fs.readFileSync('data.json', 'utf8'));
+} catch (err) {
+  console.log('No existing data store found, creating a new data.json.');
+}
+
+const gpuList = JSON.parse(fs.readFileSync('src/gpu.json', 'utf8'));
+
+function getOrAssignResources(address) {
+  if (!dataStore[address].gpu || !dataStore[address].storage) {
+    const randomGPU = gpuList[Math.floor(Math.random() * gpuList.length)];
+    const randomStorage = (Math.random() * 500).toFixed(2);
+
+    dataStore[address].gpu = randomGPU;
+    dataStore[address].storage = randomStorage;
+
+    try {
+      fs.writeFileSync('data.json', JSON.stringify(dataStore, null, 2));
+    } catch (error) {
+      console.error('Error writing GPU/storage to data.json:', error.message);
+    }
+  }
+}
+
 function displayHeader() {
   const width = process.stdout.columns;
   const headerLines = [
@@ -18,55 +43,33 @@ function displayHeader() {
   });
 }
 
-const tokens = fs.readFileSync('account.txt', 'utf8').trim().split(/\s+/).map(line => {
-  const parts = line.split(':');
-  if (parts.length !== 4) {
-    console.warn(`Skipping malformed line: ${line}`);
-    return null;
-  }
-  const [token, workerID, id, ownerAddress] = parts;
-  return { token: token.trim(), workerID: workerID.trim(), id: id.trim(), ownerAddress: ownerAddress.trim() };
-}).filter(tokenObj => tokenObj !== null);
+let wallets = [];
+try {
+  wallets = fs.readFileSync('account.txt', 'utf8')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+} catch (err) {
+  console.error('Error reading account.txt:', err.message);
+  process.exit(1);
+}
 
 let proxies = [];
 try {
-  proxies = fs.readFileSync('proxy.txt', 'utf8').trim().split(/\s+/);
+  proxies = fs.readFileSync('proxy.txt', 'utf8')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
 } catch (error) {
   console.error('Error reading proxy.txt:', error.message);
 }
 
-if (proxies.length < tokens.length) {
-  console.error('The number of proxies is less than the number of accounts. Please provide enough proxies.');
+if (proxies.length > 0 && proxies.length < wallets.length) {
+  console.error('The number of proxies is less than the number of wallets. Please provide enough proxies.');
   process.exit(1);
 }
 
 const accountIDs = {};
-
-const gpuList = JSON.parse(fs.readFileSync('src/gpu.json', 'utf8'));
-
-let dataAssignments = {};
-try {
-  dataAssignments = JSON.parse(fs.readFileSync('data.json', 'utf8'));
-} catch (error) {
-  console.log('No existing data assignments found, initializing new assignments.');
-}
-
-function getOrAssignResources(workerID) {
-  if (!dataAssignments[workerID]) {
-    const randomGPU = gpuList[Math.floor(Math.random() * gpuList.length)];
-    const randomStorage = (Math.random() * 500).toFixed(2);
-    dataAssignments[workerID] = {
-      gpu: randomGPU,
-      storage: randomStorage
-    };
-    try {
-      fs.writeFileSync('data.json', JSON.stringify(dataAssignments, null, 2));
-    } catch (error) {
-      console.error('Error writing to data.json:', error.message);
-    }
-  }
-  return dataAssignments[workerID];
-}
 
 async function askUseProxy() {
   const rl = readline.createInterface({
@@ -93,26 +96,70 @@ async function askUseProxy() {
   });
 }
 
-async function getAccountID(token, index, useProxy, delay = 60000) {
-  const proxyUrl = proxies[index];
-  const agent = useProxy ? new HttpsProxyAgent(proxyUrl) : undefined;
-  const proxyText = useProxy ? proxyUrl : 'False';
+async function generateTokenForAddress(address, agent) {
+  try {
+    const result = await axios.post(
+      'https://apitn.openledger.xyz/api/v1/auth/generate_token',
+      { address },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        httpsAgent: agent
+      }
+    );
+    return result.data?.data?.token || null;
+  } catch (error) {
+    console.error(`Error generating token for wallet ${address}:`, error.message);
+    return null;
+  }
+}
+
+async function getOrCreateWalletData(address, agent) {
+  if (!dataStore[address]) {
+    dataStore[address] = {
+      address,
+      workerID: Buffer.from(address).toString('base64'),
+      id: uuidv4(),
+      token: null,
+      gpu: null,
+      storage: null
+    };
+  }
+
+  if (!dataStore[address].token) {
+    const token = await generateTokenForAddress(address, agent);
+    if (!token) {
+      console.log('Could not generate token. Will skip this wallet for now.');
+      return null;
+    }
+    dataStore[address].token = token;
+    try {
+      fs.writeFileSync('data.json', JSON.stringify(dataStore, null, 2));
+    } catch (error) {
+      console.error('Error writing to data.json:', error.message);
+    }
+  }
+
+  return dataStore[address];
+}
+
+async function getAccountID(token, address, index, useProxy, delay = 60000) {
+  const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
+  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const proxyText = useProxy && proxyUrl ? proxyUrl : 'False';
 
   let attempt = 1;
   while (true) {
     try {
       const response = await axios.get('https://apitn.openledger.xyz/api/v1/users/me', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         httpsAgent: agent
       });
-      const accountID = response.data.data.id;
-      accountIDs[token] = accountID;
-      console.log(`\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`);
+      const acctID = response.data.data.id;
+      accountIDs[address] = acctID;
+      console.log(`\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${acctID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`);
       return;
     } catch (error) {
-      console.error(`\x1b[33m[${index + 1}]\x1b[0m Error getting accountID for token index ${index}, attempt ${attempt}:`, error.message);
+      console.error(`\x1b[33m[${index + 1}]\x1b[0m Error getting accountID for wallet ${address}, attempt ${attempt}:`, error.message);
       console.log(`\x1b[33m[${index + 1}]\x1b[0m Retrying in ${delay / 1000} seconds...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       attempt++;
@@ -120,124 +167,111 @@ async function getAccountID(token, index, useProxy, delay = 60000) {
   }
 }
 
-async function getAccountDetails(token, index, useProxy, retries = 3, delay = 60000) {
-  const proxyUrl = proxies[index];
-  const agent = useProxy ? new HttpsProxyAgent(proxyUrl) : undefined;
-  const proxyText = useProxy ? proxyUrl : 'False';
+async function getAccountDetails(token, address, index, useProxy, retries = 3, delay = 60000) {
+  const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
+  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const proxyText = useProxy && proxyUrl ? proxyUrl : 'False';
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const rewardRealtimeResponse = await axios.get('https://rewardstn.openledger.xyz/api/v1/reward_realtime', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         httpsAgent: agent
       });
-
       const rewardHistoryResponse = await axios.get('https://rewardstn.openledger.xyz/api/v1/reward_history', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         httpsAgent: agent
       });
-
       const rewardResponse = await axios.get('https://rewardstn.openledger.xyz/api/v1/reward', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         httpsAgent: agent
       });
 
-      const totalHeartbeats = parseInt(rewardRealtimeResponse.data.data[0].total_heartbeats, 10);
-      const totalPoints = parseInt(rewardHistoryResponse.data.data[0].total_points, 10);
-      const totalPointFromReward = parseFloat(rewardResponse.data.data.totalPoint);
-      const epochName = rewardResponse.data.data.name;
+      const totalHeartbeats = parseInt(rewardRealtimeResponse.data.data[0]?.total_heartbeats || 0, 10);
+      const totalPointFromReward = parseFloat(rewardResponse.data.data?.totalPoint || 0);
+      const epochName = rewardResponse.data.data?.name || '';
 
       const total = totalHeartbeats + totalPointFromReward;
 
-      console.log(`\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[token]}\x1b[0m, Total Heartbeat \x1b[32m${totalHeartbeats}\x1b[0m, Total Points \x1b[32m${total.toFixed(2)}\x1b[0m (\x1b[33m${epochName}\x1b[0m), Proxy: \x1b[36m${proxyText}\x1b[0m`);
+      console.log(
+        `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m, ` +
+        `AccountID \x1b[36m${accountIDs[address]}\x1b[0m, Total Heartbeat \x1b[32m${totalHeartbeats}\x1b[0m, ` +
+        `Total Points \x1b[32m${total.toFixed(2)}\x1b[0m (\x1b[33m${epochName}\x1b[0m), ` +
+        `Proxy: \x1b[36m${proxyText}\x1b[0m`
+      );
       return;
     } catch (error) {
-      console.error(`Error getting account details for token index ${index}, attempt ${attempt}:`, error.message);
+      console.error(`Error getting account details for wallet ${address}, attempt ${attempt}:`, error.message);
       if (attempt < retries) {
         console.log(`Retrying in ${delay / 1000} seconds...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       } else {
-        console.error(`All retry attempts failed for account details.`);
+        console.error('All retry attempts failed for account details.');
       }
     }
   }
 }
 
-async function checkAndClaimReward(token, index, useProxy, retries = 3, delay = 60000) {
-  const proxyUrl = proxies[index];
-  const agent = useProxy ? new HttpsProxyAgent(proxyUrl) : undefined;
+async function checkAndClaimReward(token, address, index, useProxy, retries = 3, delay = 60000) {
+  const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
+  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const claimDetailsResponse = await axios.get('https://rewardstn.openledger.xyz/api/v1/claim_details', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         httpsAgent: agent
       });
 
-      const claimed = claimDetailsResponse.data.data.claimed;
-
+      const claimed = claimDetailsResponse.data.data?.claimed;
       if (!claimed) {
         const claimRewardResponse = await axios.get('https://rewardstn.openledger.xyz/api/v1/claim_reward', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          },
+          headers: { 'Authorization': `Bearer ${token}` },
           httpsAgent: agent
         });
 
         if (claimRewardResponse.data.status === 'SUCCESS') {
-          console.log(`\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[token]}\x1b[0m \x1b[32mClaimed daily reward successfully!\x1b[0m`);
+          console.log(
+            `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m, ` +
+            `AccountID \x1b[36m${accountIDs[address]}\x1b[0m \x1b[32mClaimed daily reward successfully!\x1b[0m`
+          );
         }
       }
       return;
     } catch (error) {
-      console.error(`Error claiming reward for token index ${index}, attempt ${attempt}:`, error.message);
+      console.error(`Error claiming reward for wallet ${address}, attempt ${attempt}:`, error.message);
       if (attempt < retries) {
         console.log(`Retrying in ${delay / 1000} seconds...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       } else {
-        console.error(`All retry attempts failed for claiming reward.`);
+        console.error('All retry attempts failed for claiming reward.');
       }
     }
   }
 }
 
 async function checkAndClaimRewardsPeriodically(useProxy) {
-  const promises = tokens.map(({ token }, index) => checkAndClaimReward(token, index, useProxy));
+  const promises = wallets.map(async (address, index) => {
+    const { token } = dataStore[address] || {};
+    if (!token) return;
+    await checkAndClaimReward(token, address, index, useProxy);
+  });
   await Promise.all(promises);
 
   setInterval(async () => {
-    const promises = tokens.map(({ token }, index) => checkAndClaimReward(token, index, useProxy));
+    const promises = wallets.map(async (address, idx) => {
+      const { token } = dataStore[address] || {};
+      if (!token) return;
+      await checkAndClaimReward(token, address, idx, useProxy);
+    });
     await Promise.all(promises);
   }, 12 * 60 * 60 * 1000);
 }
 
-async function processRequests(useProxy) {
-  const promises = tokens.map(({ token, workerID, id, ownerAddress }, index) => {
-    return (async () => {
-      await getAccountID(token, index, useProxy);
-      if (accountIDs[token]) {
-        await getAccountDetails(token, index, useProxy);
-        await checkAndClaimReward(token, index, useProxy);
-        connectWebSocket({ token, workerID, id, ownerAddress }, index, useProxy);
-      }
-    })();
-  });
-
-  await Promise.all(promises);
-}
-
-function connectWebSocket({ token, workerID, id, ownerAddress }, index, useProxy) {
+function connectWebSocket({ token, workerID, id, address }, index, useProxy) {
+  const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
+  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
   const wsUrl = `wss://apitn.openledger.xyz/ws/v1/orch?authToken=${token}`;
-  const proxyUrl = useProxy ? proxies[index] : null;
-  const agent = useProxy ? new HttpsProxyAgent(proxyUrl) : undefined;
   const wsOptions = {
     agent,
     headers: {
@@ -255,20 +289,20 @@ function connectWebSocket({ token, workerID, id, ownerAddress }, index, useProxy
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
     }
   };
-  let ws = new WebSocket(wsUrl, wsOptions);
-  const proxyText = useProxy ? proxyUrl : 'False';
+  const proxyText = useProxy && proxyUrl ? proxyUrl : 'False';
+
+  const ws = new WebSocket(wsUrl, wsOptions);
   let heartbeatInterval;
 
-  const browserID = uuidv4();
-  const connectionUUID = uuidv4();
-
   function sendHeartbeat() {
-    const { gpu: assignedGPU, storage: assignedStorage } = getOrAssignResources(workerID);
+    getOrAssignResources(address);
+    const assignedGPU = dataStore[address].gpu || '';
+    const assignedStorage = dataStore[address].storage || '';
     const heartbeatMessage = {
       message: {
         Worker: {
           Identity: workerID,
-          ownerAddress,
+          ownerAddress: address,
           type: 'LWEXT',
           Host: 'chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc'
         },
@@ -283,12 +317,18 @@ function connectWebSocket({ token, workerID, id, ownerAddress }, index, useProxy
       workerType: 'LWEXT',
       workerID
     };
-    console.log(`\x1b[33m[${index + 1}]\x1b[0m Sending heartbeat for workerID: \x1b[33m${workerID}\x1b[0m, AccountID \x1b[33m${accountIDs[token]}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`);
+    console.log(
+      `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+      `Sending heartbeat for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
+    );
     ws.send(JSON.stringify(heartbeatMessage));
   }
 
-  ws.on('open', function open() {
-    console.log(`\x1b[33m[${index + 1}]\x1b[0m Connected to WebSocket for workerID: \x1b[33m${workerID}\x1b[0m, AccountID \x1b[33m${accountIDs[token]}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`);
+  ws.on('open', () => {
+    console.log(
+      `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+      `Connected to WebSocket for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
+    );
 
     const registerMessage = {
       workerID,
@@ -300,7 +340,7 @@ function connectWebSocket({ token, workerID, id, ownerAddress }, index, useProxy
         worker: {
           host: 'chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc',
           identity: workerID,
-          ownerAddress,
+          ownerAddress: address,
           type: 'LWEXT'
         }
       }
@@ -310,35 +350,86 @@ function connectWebSocket({ token, workerID, id, ownerAddress }, index, useProxy
     heartbeatInterval = setInterval(sendHeartbeat, 30000);
   });
 
-  ws.on('message', function incoming(data) {
-    console.log(`\x1b[33m[${index + 1}]\x1b[0m Received for workerID \x1b[33m${workerID}\x1b[0m: ${data}, AccountID \x1b[33m${accountIDs[token]}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`);
+  ws.on('message', data => {
+    console.log(
+      `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+      `Received for workerID \x1b[33m${workerID}\x1b[0m: ${data}, Proxy: \x1b[36m${proxyText}\x1b[0m`
+    );
   });
 
-  ws.on('error', function error(err) {
-    console.error(`\x1b[33m[${index + 1}]\x1b[0m WebSocket error for workerID \x1b[33m${workerID}\x1b[0m:`, err);
+  ws.on('error', err => {
+    console.error(`\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+      `WebSocket error for workerID \x1b[33m${workerID}\x1b[0m:`, err);
   });
 
-  ws.on('close', function close() {
-    console.log(`\x1b[33m[${index + 1}]\x1b[0m WebSocket connection closed for workerID \x1b[33m${workerID}\x1b[0m, AccountID \x1b[33m${accountIDs[token]}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`);
+  ws.on('close', () => {
+    console.log(
+      `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+      `WebSocket connection closed for workerID \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
+    );
     clearInterval(heartbeatInterval);
+
     setTimeout(() => {
-      console.log(`\x1b[33m[${index + 1}]\x1b[0m Reconnecting WebSocket for workerID: \x1b[33m${workerID}\x1b[0m, AccountID \x1b[33m${accountIDs[token]}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`);
-      connectWebSocket({ token, workerID, id, ownerAddress }, index, useProxy);
+      console.log(
+        `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+        `Reconnecting WebSocket for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
+      );
+      connectWebSocket({ token, workerID, id, address }, index, useProxy);
     }, 30000);
   });
 }
 
+async function processRequests(useProxy) {
+  const promises = wallets.map(async (address, index) => {
+    const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
+    const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+
+    const record = await getOrCreateWalletData(address, agent);
+    if (!record || !record.token) {
+      console.log(`Skipping wallet ${address} due to missing token.`);
+      return;
+    }
+
+    await getAccountID(record.token, address, index, useProxy);
+    if (!accountIDs[address]) {
+      console.log(`Wallet ${address} has no valid accountID, skipping further steps...`);
+      return;
+    }
+
+    getOrAssignResources(address);
+
+    await getAccountDetails(record.token, address, index, useProxy);
+    await checkAndClaimReward(record.token, address, index, useProxy);
+
+    connectWebSocket({
+      token: record.token,
+      workerID: record.workerID,
+      id: record.id,
+      address
+    }, index, useProxy);
+  });
+
+  await Promise.all(promises);
+}
+
 async function updateAccountDetailsPeriodically(useProxy) {
   setInterval(async () => {
-    const promises = tokens.map(({ token }, index) => getAccountDetails(token, index, useProxy));
+    const promises = wallets.map(async (address, index) => {
+      const { token } = dataStore[address] || {};
+      if (!token) return;
+      await getAccountDetails(token, address, index, useProxy);
+    });
     await Promise.all(promises);
   }, 5 * 60 * 1000);
 }
 
 (async () => {
   displayHeader();
+
   const useProxy = await askUseProxy();
   await checkAndClaimRewardsPeriodically(useProxy);
   await processRequests(useProxy);
   updateAccountDetailsPeriodically(useProxy);
 })();
+
+`Source: src/views/account/index.js`
