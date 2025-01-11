@@ -33,7 +33,8 @@ Openledger Bot is a simple tool designed to automate the node and daily reward c
 wallet1
 wallet2
 ```
-Copy wallet on [OpenLedger dashboard](https://testnet.openledger.xyz/?referral_code=ffqrnwqlzq)![Screenshot 202waeawea](https://github.com/user-attachments/assets/72e0f30b-a140-4a18-99a8-951a1fd1ccc4)
+To get your wallet address, login and open your profile and copy your wallet on [OpenLedger dashboard](https://testnet.openledger.xyz/?referral_code=ffqrnwqlzq)
+![Screenshot 202waeawea](https://github.com/user-attachments/assets/858c5b48-8e4d-4298-aaab-0e2d64e9f6d2)
 
 
 3. Modify and set the `proxy.txt` file if you want to use proxy
