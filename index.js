@@ -67,6 +67,7 @@ function getOrAssignResources(workerID) {
   }
   return dataAssignments[workerID];
 }
+
 async function askUseProxy() {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -195,7 +196,7 @@ async function checkAndClaimReward(token, index, useProxy, retries = 3, delay = 
           console.log(`\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[token]}\x1b[0m \x1b[32mClaimed daily reward successfully!\x1b[0m`);
         }
       }
-      return;
+      return; // Exit the function if successful
     } catch (error) {
       console.error(`Error claiming reward for token index ${index}, attempt ${attempt}:`, error.message);
       if (attempt < retries) {
@@ -235,8 +236,27 @@ async function processRequests(useProxy) {
 
 function connectWebSocket({ token, workerID, id, ownerAddress }, index, useProxy) {
   const wsUrl = `wss://apitn.openledger.xyz/ws/v1/orch?authToken=${token}`;
-  let ws = new WebSocket(wsUrl);
-  const proxyText = useProxy ? proxies[index] : 'False';
+  const proxyUrl = useProxy ? proxies[index] : null;
+  const agent = useProxy ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const wsOptions = {
+    agent,
+    headers: {
+      'Accept-Encoding': 'gzip, deflate, br, zstd',
+      'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
+      'Cache-Control': 'no-cache',
+      'Connection': 'Upgrade',
+      'Host': 'apitn.openledger.xyz',
+      'Origin': 'chrome-extension://ekbbplmjjgoobhdlffmgeokalelnmjjc',
+      'Pragma': 'no-cache',
+      'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits',
+      'Sec-WebSocket-Key': '0iJKzoEtY2vsWuXjR8ZSng==',
+      'Sec-WebSocket-Version': '13',
+      'Upgrade': 'websocket',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    }
+  };
+  let ws = new WebSocket(wsUrl, wsOptions);
+  const proxyText = useProxy ? proxyUrl : 'False';
   let heartbeatInterval;
 
   const browserID = uuidv4();
