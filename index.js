@@ -3,6 +3,7 @@ const WebSocket = require('ws');
 const axios = require('axios');
 const readline = require('readline');
 const { HttpsProxyAgent } = require('https-proxy-agent');
+const { SocksProxyAgent } = require('socks-proxy-agent'); // Add this import at the top
 const { v4: uuidv4 } = require('uuid');
 
 let dataStore = {};
@@ -144,7 +145,7 @@ async function getOrCreateWalletData(address, agent) {
 
 async function getAccountID(token, address, index, useProxy, delay = 60000) {
   const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
-  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const agent = useProxy && proxyUrl ? new SocksProxyAgent(proxyUrl) : undefined;
   const proxyText = useProxy && proxyUrl ? proxyUrl : 'False';
 
   let attempt = 1;
@@ -169,7 +170,7 @@ async function getAccountID(token, address, index, useProxy, delay = 60000) {
 
 async function getAccountDetails(token, address, index, useProxy, retries = 3, delay = 60000) {
   const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
-  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const agent = useProxy && proxyUrl ? new SocksProxyAgent(proxyUrl) : undefined;
   const proxyText = useProxy && proxyUrl ? proxyUrl : 'False';
 
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -214,7 +215,7 @@ async function getAccountDetails(token, address, index, useProxy, retries = 3, d
 
 async function checkAndClaimReward(token, address, index, useProxy, retries = 3, delay = 60000) {
   const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
-  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const agent = useProxy && proxyUrl ? new SocksProxyAgent(proxyUrl) : undefined;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -270,7 +271,7 @@ async function checkAndClaimRewardsPeriodically(useProxy) {
 
 function connectWebSocket({ token, workerID, id, address }, index, useProxy) {
   const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
-  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const agent = useProxy && proxyUrl ? new SocksProxyAgent(proxyUrl) : undefined;
   const wsUrl = `wss://apitn.openledger.xyz/ws/v1/orch?authToken=${token}`;
   const wsOptions = {
     agent,
@@ -382,7 +383,7 @@ function connectWebSocket({ token, workerID, id, address }, index, useProxy) {
 async function processRequests(useProxy) {
   const promises = wallets.map(async (address, index) => {
     const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
-    const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+    const agent = useProxy && proxyUrl ? new SocksProxyAgent(proxyUrl) : undefined;
 
     const record = await getOrCreateWalletData(address, agent);
     if (!record || !record.token) {
