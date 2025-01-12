@@ -396,10 +396,11 @@ async function processRequests(useProxy) {
       return;
     }
 
+    await checkAndClaimReward(record.token, address, index, useProxy);
+
     getOrAssignResources(address);
 
     await getAccountDetails(record.token, address, index, useProxy);
-    await checkAndClaimReward(record.token, address, index, useProxy);
 
     connectWebSocket({
       token: record.token,
