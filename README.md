@@ -4,6 +4,7 @@ Openledger Bot is a simple tool designed to automate the node and daily reward c
 ## Features
 - **Automated node interaction**
 - **Auto claim daily rewards**
+- **Auto claim medals**
 - **Proxy support**
 
 ## Prerequisites
@@ -27,8 +28,7 @@ Openledger Bot is a simple tool designed to automate the node and daily reward c
 ## Usage
 
 1. Set the `account.txt` and `proxy.txt (if you want to use proxy)` before running the script. Below how to setup this fie.
-2. Configuration:
-   Modify the `account.txt` file with your account wallet info
+2. Modify the `account.txt` file with your account wallet info
 ```
 wallet1
 wallet2
