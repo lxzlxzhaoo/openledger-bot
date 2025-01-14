@@ -96,20 +96,28 @@ async function askUseProxy() {
   });
 }
 
-async function generateTokenForAddress(address, agent) {
-  try {
-    const result = await axios.post(
+async function generateTokenForAddress(address, agent, retries = 3, delay = 60000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const result = await axios.post(
         'https://apitn.openledger.xyz/api/v1/auth/generate_token',
         { address },
         {
           headers: { 'Content-Type': 'application/json' },
           httpsAgent: agent
         }
-    );
-    return result.data?.data?.token || null;
-  } catch (error) {
-    console.error(`Error generating token for wallet ${address}:`, error.message);
-    return null;
+      );
+      return result.data?.data?.token || null;
+    } catch (error) {
+      console.error(`Error generating token for wallet ${address}, attempt ${attempt}:`, error.message);
+      if (attempt < retries) {
+        console.log(`Retrying token generation for wallet ${address} in ${delay / 1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        console.log('Could not generate token. Will skip this wallet for now.');
+        return null;
+      }
+    }
   }
 }
 
