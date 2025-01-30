@@ -64,11 +64,6 @@ try {
   console.error('Error reading proxy.txt:', error.message);
 }
 
-if (proxies.length > 0 && proxies.length < wallets.length) {
-  console.error('The number of proxies is less than the number of wallets. Please provide enough proxies.');
-  process.exit(1);
-}
-
 const accountIDs = {};
 
 async function askUseProxy() {
@@ -101,12 +96,12 @@ async function generateTokenForAddress(address, agent, delay = 60000) {
   while (true) {
     try {
       const result = await axios.post(
-        'https://apitn.openledger.xyz/api/v1/auth/generate_token',
-        { address },
-        {
-          headers: { 'Content-Type': 'application/json' },
-          httpsAgent: agent
-        }
+          'https://apitn.openledger.xyz/api/v1/auth/generate_token',
+          { address },
+          {
+            headers: { 'Content-Type': 'application/json' },
+            httpsAgent: agent
+          }
       );
       return result.data?.data?.token || null;
     } catch (error) {
@@ -391,18 +386,18 @@ async function claimMedals(token, address, index, useProxy) {
   for (let tierId = 1; tierId <= 8; tierId++) {
     try {
       const response = await axios.put(
-        'https://rewardstn.openledger.xyz/api/v1/claim_tier',
-        { tierId },
-        {
-          headers: { 'Authorization': `Bearer ${token}` },
-          httpsAgent: agent
-        }
+          'https://rewardstn.openledger.xyz/api/v1/claim_tier',
+          { tierId },
+          {
+            headers: { 'Authorization': `Bearer ${token}` },
+            httpsAgent: agent
+          }
       );
 
       if (response.data.status === 'SUCCESS' && response.data.data === true) {
         console.log(
-          `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m: ` +
-          `Successfully claimed medal for tier \x1b[32m${tierId}\x1b[0m`
+            `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m: ` +
+            `Successfully claimed medal for tier \x1b[32m${tierId}\x1b[0m`
         );
       }
     } catch (error) {
@@ -472,6 +467,14 @@ async function updateAccountDetailsPeriodically(useProxy) {
   displayHeader();
 
   const useProxy = await askUseProxy();
+
+  if (useProxy) {
+    if (proxies.length < wallets.length) {
+      console.error('The number of proxies is less than the number of wallets. Please provide enough proxies.');
+      process.exit(1);
+    }
+  }
+
   await checkAndClaimRewardsPeriodically(useProxy);
   await processRequests(useProxy);
   updateAccountDetailsPeriodically(useProxy);
