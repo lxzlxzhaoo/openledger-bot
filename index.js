@@ -47,9 +47,9 @@ function displayHeader() {
 let wallets = [];
 try {
   wallets = fs.readFileSync('account.txt', 'utf8')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
 } catch (err) {
   console.error('Error reading account.txt:', err.message);
   process.exit(1);
@@ -58,16 +58,11 @@ try {
 let proxies = [];
 try {
   proxies = fs.readFileSync('proxy.txt', 'utf8')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
 } catch (error) {
   console.error('Error reading proxy.txt:', error.message);
-}
-
-if (proxies.length > 0 && proxies.length < wallets.length) {
-  console.error('The number of proxies is less than the number of wallets. Please provide enough proxies.');
-  process.exit(1);
 }
 
 const accountIDs = {};
@@ -97,20 +92,25 @@ async function askUseProxy() {
   });
 }
 
-async function generateTokenForAddress(address, agent) {
-  try {
-    const result = await axios.post(
-      'https://apitn.openledger.xyz/api/v1/auth/generate_token',
-      { address },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        httpsAgent: agent
-      }
-    );
-    return result.data?.data?.token || null;
-  } catch (error) {
-    console.error(`Error generating token for wallet ${address}:`, error.message);
-    return null;
+async function generateTokenForAddress(address, agent, delay = 60000) {
+  let attempt = 1;
+  while (true) {
+    try {
+      const result = await axios.post(
+          'https://apitn.openledger.xyz/api/v1/auth/generate_token',
+          { address },
+          {
+            headers: { 'Content-Type': 'application/json' },
+            httpsAgent: agent
+          }
+      );
+      return result.data?.data?.token || null;
+    } catch (error) {
+      console.error(`Error generating token for wallet ${address}, attempt ${attempt}:`, error.message);
+      console.log(`Retrying token generation for wallet ${address} in ${delay / 1000} seconds...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      attempt++;
+    }
   }
 }
 
@@ -195,10 +195,10 @@ async function getAccountDetails(token, address, index, useProxy, retries = 3, d
       const total = totalHeartbeats + totalPointFromReward;
 
       console.log(
-        `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m, ` +
-        `AccountID \x1b[36m${accountIDs[address]}\x1b[0m, Total Heartbeat \x1b[32m${totalHeartbeats}\x1b[0m, ` +
-        `Total Points \x1b[32m${total.toFixed(2)}\x1b[0m (\x1b[33m${epochName}\x1b[0m), ` +
-        `Proxy: \x1b[36m${proxyText}\x1b[0m`
+          `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m, ` +
+          `AccountID \x1b[36m${accountIDs[address]}\x1b[0m, Total Heartbeat \x1b[32m${totalHeartbeats}\x1b[0m, ` +
+          `Total Points \x1b[32m${total.toFixed(2)}\x1b[0m (\x1b[33m${epochName}\x1b[0m), ` +
+          `Proxy: \x1b[36m${proxyText}\x1b[0m`
       );
       return;
     } catch (error) {
@@ -233,8 +233,8 @@ async function checkAndClaimReward(token, address, index, useProxy, retries = 3,
 
         if (claimRewardResponse.data.status === 'SUCCESS') {
           console.log(
-            `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m, ` +
-            `AccountID \x1b[36m${accountIDs[address]}\x1b[0m \x1b[32mClaimed daily reward successfully!\x1b[0m`
+              `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m, ` +
+              `AccountID \x1b[36m${accountIDs[address]}\x1b[0m \x1b[32mClaimed daily reward successfully!\x1b[0m`
           );
         }
       }
@@ -319,16 +319,16 @@ function connectWebSocket({ token, workerID, id, address }, index, useProxy) {
       workerID
     };
     console.log(
-      `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
-      `Sending heartbeat for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
+        `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+        `Sending heartbeat for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
     );
     ws.send(JSON.stringify(heartbeatMessage));
   }
 
   ws.on('open', () => {
     console.log(
-      `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
-      `Connected to WebSocket for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
+        `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+        `Connected to WebSocket for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
     );
 
     const registerMessage = {
@@ -353,31 +353,58 @@ function connectWebSocket({ token, workerID, id, address }, index, useProxy) {
 
   ws.on('message', data => {
     console.log(
-      `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
-      `Received for workerID \x1b[33m${workerID}\x1b[0m: ${data}, Proxy: \x1b[36m${proxyText}\x1b[0m`
+        `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+        `Received for workerID \x1b[33m${workerID}\x1b[0m: ${data}, Proxy: \x1b[36m${proxyText}\x1b[0m`
     );
   });
 
   ws.on('error', err => {
     console.error(`\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
-      `WebSocket error for workerID \x1b[33m${workerID}\x1b[0m:`, err);
+        `WebSocket error for workerID \x1b[33m${workerID}\x1b[0m:`, err);
   });
 
   ws.on('close', () => {
     console.log(
-      `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
-      `WebSocket connection closed for workerID \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
+        `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+        `WebSocket connection closed for workerID \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
     );
     clearInterval(heartbeatInterval);
 
     setTimeout(() => {
       console.log(
-        `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
-        `Reconnecting WebSocket for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
+          `\x1b[33m[${index + 1}]\x1b[0m AccountID \x1b[36m${accountIDs[address]}\x1b[0m: ` +
+          `Reconnecting WebSocket for workerID: \x1b[33m${workerID}\x1b[0m, Proxy: \x1b[36m${proxyText}\x1b[0m`
       );
       connectWebSocket({ token, workerID, id, address }, index, useProxy);
     }, 30000);
   });
+}
+
+async function claimMedals(token, address, index, useProxy) {
+  const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
+  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+
+  for (let tierId = 1; tierId <= 8; tierId++) {
+    try {
+      const response = await axios.put(
+          'https://rewardstn.openledger.xyz/api/v1/claim_tier',
+          { tierId },
+          {
+            headers: { 'Authorization': `Bearer ${token}` },
+            httpsAgent: agent
+          }
+      );
+
+      if (response.data.status === 'SUCCESS' && response.data.data === true) {
+        console.log(
+            `\x1b[33m[${index + 1}]\x1b[0m Wallet \x1b[36m${address}\x1b[0m: ` +
+            `Successfully claimed medal for tier \x1b[32m${tierId}\x1b[0m`
+        );
+      }
+    } catch (error) {
+
+    }
+  }
 }
 
 async function processRequests(useProxy) {
@@ -397,21 +424,33 @@ async function processRequests(useProxy) {
       return;
     }
 
-    await checkAndClaimReward(record.token, address, index, useProxy);
-
-    getOrAssignResources(address);
-
-    await getAccountDetails(record.token, address, index, useProxy);
-
     connectWebSocket({
       token: record.token,
       workerID: record.workerID,
       id: record.id,
       address
     }, index, useProxy);
+
+    await Promise.all([
+      claimMedals(record.token, address, index, useProxy),
+      checkAndClaimReward(record.token, address, index, useProxy),
+      getAccountDetails(record.token, address, index, useProxy)
+    ]);
+
+    getOrAssignResources(address);
   });
 
   await Promise.all(promises);
+}
+async function claimMedalsPeriodically(useProxy) {
+  setInterval(async () => {
+    const promises = wallets.map(async (address, index) => {
+      const { token } = dataStore[address] || {};
+      if (!token) return;
+      await claimMedals(token, address, index, useProxy);
+    });
+    await Promise.all(promises);
+  }, 12 * 60 * 60 * 1000);
 }
 
 async function updateAccountDetailsPeriodically(useProxy) {
@@ -429,7 +468,16 @@ async function updateAccountDetailsPeriodically(useProxy) {
   displayHeader();
 
   const useProxy = await askUseProxy();
+
+  if (useProxy) {
+    if (proxies.length < wallets.length) {
+      console.error('The number of proxies is less than the number of wallets. Please provide enough proxies.');
+      process.exit(1);
+    }
+  }
+
   await checkAndClaimRewardsPeriodically(useProxy);
   await processRequests(useProxy);
   updateAccountDetailsPeriodically(useProxy);
+  claimMedalsPeriodically(useProxy);
 })();
