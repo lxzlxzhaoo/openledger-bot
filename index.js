@@ -382,7 +382,7 @@ function connectWebSocket({ token, workerID, id, address }, index, useProxy) {
 
 async function claimMedals(token, address, index, useProxy) {
   const proxyUrl = proxies.length > 0 ? proxies[index % proxies.length] : '';
-  const agent = useProxy && proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+  const agent = useProxy && proxyUrl ? new SocksProxyAgent(proxyUrl) : undefined;
 
   for (let tierId = 1; tierId <= 8; tierId++) {
     try {
